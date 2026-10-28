@@ -24,6 +24,16 @@ while [ $# -gt 0 ]; do
 done
 SUBCMD="${1:-}"; [ $# -gt 0 ] && shift
 
+# Provider-neutral validation needs neither OpenCode state nor its cache helpers.
+if [ "$SUBCMD" = "validate-ledger-v4" ]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' 'ERROR: python3 required for validate-ledger-v4' >&2
+    printf '%s\n' '{"valid":false,"error":"environment"}'
+    exit 2
+  fi
+  exec python3 "$SELF_DIR/validate_ledger_v4.py" validate "$@"
+fi
+
 detect_os() {
   case "$(uname -s 2>/dev/null || echo unknown)" in
     Darwin) echo darwin ;;
@@ -1299,6 +1309,8 @@ orchestrate.sh [--os <darwin|linux|wsl|windows-gbash>] <subcmd> [args]
 Equivalent wrappers: orchestrate-darwin.sh | orchestrate-linux.sh | orchestrate-wsl.sh | orchestrate-windows.sh
 
 Subcommands:
+  validate-ledger-v4 PATH            validate provider-neutral schema-4 JSON (Python 3.9+);
+                                     exit 0 valid, 1 invalid, 2 usage/environment error
   preflight [dir]                    delegates to scripts/preflight.sh and populates the state cache
   ensure-root --title T              POST /api/session root; verifies parentID=null; caches root_session
   create-worker --title T [--agent A] [--model id@prov] [--force-new]
