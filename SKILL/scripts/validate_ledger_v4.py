@@ -14,6 +14,8 @@ STATES = {
     "completed", "verified", "blocked", "failed", "interrupted", "cancelled", "partial",
 }
 OUTCOMES = {"unknown", "succeeded", "failed", "interrupted", "cancelled"}
+EXCEPTIONAL_STATES = {"failed", "blocked", "partial", "interrupted", "cancelled"}
+TERMINAL_STATES = EXCEPTIONAL_STATES | {"verified"}
 FIELDS = {
     "task_id", "parent_task_id", "depends_on", "provider", "agent_id", "model_id",
     "runtime_ref", "workspace", "write_scopes", "prompt_path", "output_path",
@@ -103,7 +105,7 @@ def ancestors(graph, label):
     return result
 
 
-def validate(ledger, ledger_dir):
+def validate(ledger, ledger_dir, closing=False):
     require(isinstance(ledger, dict), "root must be an object")
     require(type(ledger.get("schema_version")) is int and ledger["schema_version"] == 4,
             "schema_version must be 4; use legacy validators for schema 3")
@@ -125,6 +127,9 @@ def validate(ledger, ledger_dir):
                                ("execution_outcome", OUTCOMES)):
             require(isinstance(task[field], str) and task[field] in choices,
                     f"{label}.{field} is invalid")
+        if closing:
+            require(task["state"] in TERMINAL_STATES,
+                    f"{label}: closing requires a terminal state; found {task['state']}")
         for field in ("agent_id", "model_id", "runtime_ref", "runtime_status", "parent_task_id"):
             require(task[field] is None or nonempty(task[field]),
                     f"{label}.{field} must be null or a non-empty string")
@@ -146,7 +151,7 @@ def validate(ledger, ledger_dir):
         evidence = [workspace_path(path, workspace, f"{label}.evidence_paths")
                     for path in string_list(task["evidence_paths"], f"{label}.evidence_paths")]
         paths[task_id] = scopes
-        if task["state"] in {"failed", "blocked", "partial", "interrupted", "cancelled"}:
+        if task["state"] in EXCEPTIONAL_STATES:
             require(nonempty(task["notes"]), f"{label} requires a reason in notes")
         if task["state"] == "verified":
             require(task["execution_outcome"] == "succeeded", f"{label}: verified requires succeeded outcome")
@@ -185,8 +190,11 @@ def validate(ledger, ledger_dir):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    closing = len(argv) > 1 and argv[0] == "validate" and argv[1] == "--closing"
+    if closing:
+        argv = [argv[0], *argv[2:]]
     if len(argv) != 2 or argv[0] != "validate":
-        print("usage: validate_ledger_v4.py validate PATH", file=sys.stderr)
+        print("usage: validate_ledger_v4.py validate [--closing] PATH", file=sys.stderr)
         print(json.dumps({"valid": False, "error": "usage"}))
         return 2
     try:
@@ -201,7 +209,7 @@ def main(argv=None):
         print(json.dumps({"valid": False, "error": "invalid"}))
         return 1
     try:
-        count = validate(ledger, path.parent)
+        count = validate(ledger, path.parent, closing=closing)
     except (ValueError, OSError, RuntimeError) as exc:
         print(f"invalid ledger: {exc}", file=sys.stderr)
         print(json.dumps({"valid": False, "schema_version": 4, "error": "invalid"}))

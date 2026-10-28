@@ -1309,7 +1309,9 @@ orchestrate.sh [--os <darwin|linux|wsl|windows-gbash>] <subcmd> [args]
 Equivalent wrappers: orchestrate-darwin.sh | orchestrate-linux.sh | orchestrate-wsl.sh | orchestrate-windows.sh
 
 Subcommands:
-  validate-ledger-v4 PATH            validate provider-neutral schema-4 JSON (Python 3.9+);
+  validate-ledger-v4 [--closing] PATH validate provider-neutral schema-4 JSON (Python 3.9+);
+                                     --closing requires every task to be verified or a
+                                     documented failed/blocked/partial/interrupted/cancelled task;
                                      exit 0 valid, 1 invalid, 2 usage/environment error
   preflight [dir]                    delegates to scripts/preflight.sh and populates the state cache
   ensure-root --title T              POST /api/session root; verifies parentID=null; caches root_session

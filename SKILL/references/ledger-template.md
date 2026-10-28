@@ -3,12 +3,12 @@
 ## Schema 4: provider-neutral JSON
 
 Codex-led runs use schema 4. Validate before dispatch and after transitions with
-`python3 scripts/validate_ledger_v4.py validate PATH` or
-`sh scripts/orchestrate.sh validate-ledger-v4 PATH`. Python 3.9+ is required.
+`python3 scripts/validate_ledger_v4.py validate [--closing] PATH` or
+`sh scripts/orchestrate.sh validate-ledger-v4 [--closing] PATH`. Python 3.9+ is required.
 The command emits one JSON summary on stdout and diagnostics on stderr; exit
 codes are `0` valid, `1` invalid content, and `2` usage/environment error.
-It does not contact any provider. Structurally valid in-progress runs are valid;
-validation does not assert that the whole run has finished.
+It does not contact any provider. Default validation accepts structurally valid
+in-progress runs. Add `--closing` before `PATH` to require a settled whole run.
 
 Root fields are `schema_version: 4`, `run` (an object for run metadata, which may
 be empty), and `tasks` (a list, which may be empty). Every task requires the keys
@@ -58,9 +58,12 @@ task's exact `task_id` and `criterion`, `result: "pass"`, and a non-empty string
 `observed`. File existence or process exit alone cannot prove verification.
 These checks apply per task: unfinished independent tasks do not invalidate a
 verified result, and a missing optional provider does not invalidate the run.
-To close a run, the coordinator must additionally wait until every task is in a
-terminal state (`verified`, `blocked`, `failed`, `interrupted`, `cancelled`, or
-`partial`); `completed` still awaits Codex review.
+To close a run, use `validate --closing PATH` (or the shell route's
+`validate-ledger-v4 --closing PATH`). The validator rejects `pending`, `launching`,
+`running`, `awaiting-approval`, `outcome-unknown`, and `completed` tasks in this
+mode. Every task must be `verified` with the successful outcome and evidence
+described above, or `blocked`, `failed`, `interrupted`, `cancelled`, or `partial`
+with a non-empty reason in `notes`. `completed` still awaits Codex review.
 
 Example evidence for a reviewed task:
 
@@ -77,6 +80,9 @@ The following illustrative run has independent Codex/OpenCode tasks, a Codex
 integration task depending on both, and a blocked optional Antigravity task.
 Replace `workspace`, create the prompt files, and reconcile artifact paths
 before validation. Runtime references remain null until observed.
+The pending tasks make this example eligible for default validation, but it
+cannot pass `--closing` until those tasks are verified or documented exceptional
+outcomes.
 
 ```json
 {
