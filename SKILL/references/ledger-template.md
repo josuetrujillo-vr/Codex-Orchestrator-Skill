@@ -9,6 +9,29 @@ The command emits one JSON summary on stdout and diagnostics on stderr; exit
 codes are `0` valid, `1` invalid content, and `2` usage/environment error.
 It does not contact any provider. Default validation accepts structurally valid
 in-progress runs. Add `--closing` before `PATH` to require a settled whole run.
+The runner entry points are `preflight-providers [--ledger PATH]`,
+`run-multiruntime --ledger PATH [--parallel N]`,
+`status-multiruntime --ledger PATH`, and
+`verify-task --ledger PATH --task-id ID --observed TEXT`, exposed through
+`sh scripts/orchestrate.sh`. The default run limit is
+`run.max_parallel_tasks: 3`; `--parallel N` overrides it for that invocation.
+
+Optional `run.providers` is an object keyed by `codex`, `opencode`, or
+`antigravity`. Each value may contain only `command` (executable string or
+argument list), `timeout`, `model_id`, `agent_id`, and `profile`. These are
+adapter options, not credentials. Put authentication in each provider's local
+CLI configuration. Codex has no agent selector; use a configured profile or
+model when needed. See [provider-adapters.md](provider-adapters.md) for the
+provider-specific discovery and execution contracts.
+
+`run-multiruntime` validates before dispatch, writes `launching` durably before
+submitting a worker, and updates the JSON ledger atomically. It launches only
+tasks with verified dependencies. Independent tasks can run together, while
+overlapping write scopes and artifact reservations are serialized. It blocks
+tasks that require an unavailable provider while continuing unrelated tasks.
+An uncertain effect is `outcome-unknown`; it is not retried automatically.
+The runner's per-ledger `.lock` marker is fail-closed: after a crash, reconcile
+provider effects before manually removing a stale marker and running again.
 
 Root fields are `schema_version: 4`, `run` (an object for run metadata, which may
 be empty), and `tasks` (a list, which may be empty). Every task requires the keys
@@ -17,7 +40,7 @@ in the example below. No OpenCode worker/subagent count applies to schema 4.
 - `task_id` is unique and matches `[A-Za-z0-9][A-Za-z0-9_.-]*`.
 - `parent_task_id` is a logical owner's task ID or `null`; `depends_on` is a list
   of prerequisite task IDs. Both references must exist and their respective
-  graphs must be acyclic. Ownership does not imply execution order.
+  graphs must be acyclic. `parent_task_id` alone never serializes tasks.
 - `provider` is `codex`, `opencode`, or `antigravity`. `agent_id`, `model_id`,
   `runtime_ref`, and `runtime_status` are non-empty strings or `null`.
   Configured agent/model identifiers may be recorded before dispatch;
@@ -34,9 +57,10 @@ in the example below. No OpenCode worker/subagent count applies to schema 4.
   Scopes can describe files or directories that do not exist yet. An empty
   `write_scopes` means the worker is read-only; the coordinator may persist its
   returned output/evidence within the workspace.
-- Overlapping write scopes require a direct or transitive `depends_on` ordering,
-  including logical parent/child tasks. Paths are compared by components
-  (`src` overlaps `src/a.py`, but not `src2`).
+- Overlapping write scopes are allowed only when a direct or transitive
+  `depends_on` edge orders the tasks, including logical parent/child tasks;
+  `parent_task_id` alone never allows overlapping scopes. Paths are compared by
+  components (`src` overlaps `src/a.py`, but not `src2`).
 - `criterion` is a non-empty assertion for Codex to review against the result.
   `notes` is a string and must contain a reason for `failed`, `blocked`,
   `partial`, `interrupted`, or `cancelled` tasks.
@@ -48,6 +72,12 @@ in the example below. No OpenCode worker/subagent count applies to schema 4.
 - `created_at` and `last_state_at` are UTC `YYYY-MM-DDTHH:MM:SSZ` timestamps.
   Preserve creation time and advance state time on transitions; state time
   cannot precede creation time.
+
+The runner stores response and trace artifacts under
+`.orchestrator/<ledger-path-hash>/<task-id>/` within the task workspace. When
+`output_path` is `null`, the runner may use its response artifact as the task
+output. Confirm artifact paths and declared scopes do not conflict across
+tasks before dispatch.
 
 Runtime success transitions to `completed`, never automatically to `verified`.
 Codex reviews output against `criterion`, then calls `verify-task` to persist

@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Reframed the skill as `codex-multi-runtime-orchestrator`, with the active
+  Codex conversation as root and Codex CLI, OpenCode, and Antigravity as
+  independently discoverable workers. Codex now plans distinct DAG tasks,
+  routes them to available configured agents, and integrates reviewed results.
+- Added provider adapter documentation for Codex JSONL, OpenCode's live-schema
+  API, Antigravity NDJSON, workspace checks, permission policies, unavailable
+  providers, and timeout reconciliation.
+- Documented the schema-4 provider-neutral JSON ledger and its runner commands;
+  retained schema-3 OpenCode-only ledgers and validators as a legacy route.
+- Updated Codex installation instructions, the closed package inventory, and
+  CI package naming while keeping the Linux, macOS, and Windows matrix.
+
 ## [1.8.0] - 2026-10-27
 
 ### The parsers and the path rules, in one place

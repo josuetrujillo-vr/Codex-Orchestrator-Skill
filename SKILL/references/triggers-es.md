@@ -1,25 +1,24 @@
-# Spanish-language activation triggers
+# Activación en español
 
-The canonical trigger list (positive and negative examples) lives in
-`SKILL.md`'s frontmatter `description` field and in `trigger-tests.md`.
-This file holds the same coverage in Spanish so a Spanish-speaking agent
-recognises the skill from prompts phrased in Spanish.
+La skill coordina trabajo multiagente desde Codex y puede delegar tareas
+distintas en Codex CLI, OpenCode y Antigravity. Esta lista refleja el
+`description` de `SKILL.md` y los casos canónicos de
+[`trigger-tests.md`](trigger-tests.md).
 
-## Positive examples (the skill SHOULD activate)
+## Debe activarse
 
-- *"Orquesta varias sesiones de OpenCode: crea dos workers y que cada uno lance al menos dos subagents para revisar los módulos auth y billing, y luego integra los resultados."*
-- *"Necesito delegar en OpenCode una migración grande: gestiona las sesiones, reparte scopes de escritura sin solapes y dime qué worker quedó verificado."*
-- *"Lanza workers y subagents en mi servidor OpenCode para un run multi-agente, hazles seguimiento en un ledger y valida el DAG antes de cerrar."*
-- *"Gestiona una ejecución multiagente en OpenCode y valida el ledger YAML al terminar."*
+- *"Desde Codex, divide esta migración en tareas y coordina workers de Codex, OpenCode y Antigravity; integra sus resultados."*
+- *"Orquesta varios agentes para revisar módulos distintos, asigna scopes sin solapamiento y registra el resultado en un ledger."*
+- *"Coordina desde Codex una revisión paralela con los runtimes que estén disponibles; si falta uno, continúa las tareas independientes."*
+- *"Reparte este trabajo entre varios agentes, controla dependencias en un DAG y verifica cada resultado antes de integrarlo."*
+- *"Continúa esta corrida OpenCode existente con su ledger YAML schema 3 y sus workers."* (ruta heredada)
 
-## Negative examples (the skill should NOT activate)
+## No debe activarse
 
-- *"Explícame qué es un agente de IA y en qué se diferencia de un chatbot."* (concepto general)
-- *"Corrige el bug de este componente React que rompe el submit del formulario."* (tarea de un solo agente)
-- *"Orquesta un nightly Airflow pipeline que carga CSVs."* (pipeline de datos, otro runtime)
+- *"Explícame qué es un agente de IA y en qué se diferencia de un chatbot."* (explicación general)
+- *"Corrige este bug de React."* (solicitud de agente único)
+- *"Orquesta un pipeline de Airflow que carga CSV cada noche."* (orquestación genérica de datos)
 
-## Mapping to the canonical English list
-
-Every Spanish example above has a direct English counterpart in `SKILL.md`'s
-frontmatter and in `trigger-tests.md`. They activate the same skill with the
-same arguments; the Spanish wording is only a hint for routing.
+Los ejemplos positivos requieren coordinación de tareas mediante varios
+agentes o runtimes. Las tareas individuales, explicaciones generales y
+pipelines de datos no entran en el alcance.
