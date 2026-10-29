@@ -34,6 +34,23 @@ if [ "$SUBCMD" = "validate-ledger-v4" ]; then
   exec python3 "$SELF_DIR/validate_ledger_v4.py" validate "$@"
 fi
 
+case "$SUBCMD" in
+  preflight-providers|run-multiruntime|status-multiruntime|verify-task)
+    if ! command -v python3 >/dev/null 2>&1; then
+      printf '%s\n' 'ERROR: python3 required for multi-runtime commands' >&2
+      printf '%s\n' '{"error":"environment"}'
+      exit 2
+    fi
+    case "$SUBCMD" in
+      preflight-providers) _runtime_command=preflight ;;
+      run-multiruntime) _runtime_command=run ;;
+      status-multiruntime) _runtime_command=status ;;
+      verify-task) _runtime_command=verify-task ;;
+    esac
+    exec python3 "$SELF_DIR/run_multiruntime.py" "$_runtime_command" "$@"
+    ;;
+esac
+
 detect_os() {
   case "$(uname -s 2>/dev/null || echo unknown)" in
     Darwin) echo darwin ;;
@@ -1309,6 +1326,12 @@ orchestrate.sh [--os <darwin|linux|wsl|windows-gbash>] <subcmd> [args]
 Equivalent wrappers: orchestrate-darwin.sh | orchestrate-linux.sh | orchestrate-wsl.sh | orchestrate-windows.sh
 
 Subcommands:
+  preflight-providers [--ledger PATH] provider capability JSON records; missing providers are nonfatal
+  run-multiruntime --ledger PATH [--parallel N]
+                                     run ready schema-4 tasks (default parallel limit 3)
+  status-multiruntime --ledger PATH  schema-4 task states and observed runtime references as JSON
+  verify-task --ledger PATH --task-id ID --observed TEXT
+                                     record Codex's review of a completed task and unblock dependents
   validate-ledger-v4 [--closing] PATH validate provider-neutral schema-4 JSON (Python 3.9+);
                                      --closing requires every task to be verified or a
                                      documented failed/blocked/partial/interrupted/cancelled task;

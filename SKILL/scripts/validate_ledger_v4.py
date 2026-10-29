@@ -16,6 +16,7 @@ STATES = {
 OUTCOMES = {"unknown", "succeeded", "failed", "interrupted", "cancelled"}
 EXCEPTIONAL_STATES = {"failed", "blocked", "partial", "interrupted", "cancelled"}
 TERMINAL_STATES = EXCEPTIONAL_STATES | {"verified"}
+ACTIVE_STATES = {"launching", "running", "awaiting-approval", "outcome-unknown"}
 FIELDS = {
     "task_id", "parent_task_id", "depends_on", "provider", "agent_id", "model_id",
     "runtime_ref", "workspace", "write_scopes", "prompt_path", "output_path",
@@ -105,11 +106,17 @@ def ancestors(graph, label):
     return result
 
 
+def scopes_overlap(first, second):
+    return any(a.is_relative_to(b) or b.is_relative_to(a) for a in first for b in second)
+
+
 def validate(ledger, ledger_dir, closing=False):
     require(isinstance(ledger, dict), "root must be an object")
     require(type(ledger.get("schema_version")) is int and ledger["schema_version"] == 4,
             "schema_version must be 4; use legacy validators for schema 3")
     require(isinstance(ledger.get("run"), dict), "run must be an object")
+    limit = ledger["run"].get("max_parallel_tasks", 3)
+    require(type(limit) is int and limit > 0, "run.max_parallel_tasks must be a positive integer")
     require(isinstance(ledger.get("tasks"), list), "tasks must be a list")
     tasks = {}
     paths = {}
@@ -181,10 +188,12 @@ def validate(ledger, ledger_dir, closing=False):
     task_ids = list(tasks)
     for index, first in enumerate(task_ids):
         for second in task_ids[index + 1:]:
-            overlap = any(a.is_relative_to(b) or b.is_relative_to(a)
-                          for a in paths[first] for b in paths[second])
+            overlap = scopes_overlap(paths[first], paths[second])
             require(not overlap or first in order[second] or second in order[first],
                     f"conflicting write scopes: {first} and {second} need an ordering dependency")
+            require(not overlap or not (tasks[first]["state"] in ACTIVE_STATES and
+                                        tasks[second]["state"] in ACTIVE_STATES),
+                    f"conflicting active write scopes: {first} and {second}")
     return len(tasks)
 
 
