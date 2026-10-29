@@ -17,7 +17,7 @@
 # Exit codes: 0 = success, 1 = invalid source or inventory mismatch, 2 = usage/environment.
 set -eu
 
-PACKAGE_NAME="opencode-orchestrator-skill" # must match the frontmatter `name`
+PACKAGE_NAME="codex-multi-runtime-orchestrator" # must match the frontmatter `name`
 SOURCE_ROOT="$(pwd -P)/SKILL"
 
 # --- Closed list (single source of truth; last entry = self-inclusion) --------
@@ -37,6 +37,7 @@ references/ledger-template.md
 references/naming-convention.md
 references/opencode-patterns.md
 references/playbook.md
+references/provider-adapters.md
 references/prompt-templates.md
 references/recipe-tui-tabs.md
 references/research-evidence.md
@@ -60,9 +61,16 @@ scripts/os/windows-gbash.sh
 scripts/os/wsl.sh
 scripts/package.sh
 scripts/preflight.sh
+scripts/providers/__init__.py
+scripts/providers/antigravity.py
+scripts/providers/base.py
+scripts/providers/codex.py
+scripts/providers/opencode.py
 scripts/prompt-templates/router-orchestrator.md
+scripts/run_multiruntime.py
 scripts/validate_dag.sh
 scripts/validate_ledger_closed.sh
+scripts/validate_ledger_v4.py
 scripts/watch_run.sh
 '
 

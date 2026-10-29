@@ -7,7 +7,7 @@ on:
 
 jobs:
   checks:
-    name: shellcheck + sh -n + package (${{ matrix.os }})
+    name: Codex skill checks + package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -111,7 +111,7 @@ jobs:
           # under SKILL/: the inventory comparison is derived from the list
           # itself, so on its own it cannot see a file that is not in it.
           sh SKILL/scripts/package.sh
-          test -f dist/opencode-orchestrator-skill.zip
+          test -f dist/codex-multi-runtime-orchestrator.zip
           echo "package build PASS"
       - name: Windows proxy (no CR in the values the shell reads)
         run: |

@@ -1,5 +1,176 @@
 # Canonical execution ledger
 
+## Schema 4: provider-neutral JSON
+
+Codex-led runs use schema 4. Validate before dispatch and after transitions with
+`python3 scripts/validate_ledger_v4.py validate [--closing] PATH` or
+`sh scripts/orchestrate.sh validate-ledger-v4 [--closing] PATH`. Python 3.9+ is required.
+The command emits one JSON summary on stdout and diagnostics on stderr; exit
+codes are `0` valid, `1` invalid content, and `2` usage/environment error.
+It does not contact any provider. Default validation accepts structurally valid
+in-progress runs. Add `--closing` before `PATH` to require a settled whole run.
+The runner entry points are `preflight-providers [--ledger PATH]`,
+`run-multiruntime --ledger PATH [--parallel N]`,
+`status-multiruntime --ledger PATH`, and
+`verify-task --ledger PATH --task-id ID --observed TEXT`, exposed through
+`sh scripts/orchestrate.sh`. The default run limit is
+`run.max_parallel_tasks: 3`; `--parallel N` overrides it for that invocation.
+
+Optional `run.providers` is an object keyed by `codex`, `opencode`, or
+`antigravity`. Each value may contain only `command` (executable string or
+argument list), `timeout`, `model_id`, `agent_id`, and `profile`. These are
+adapter options, not credentials. Put authentication in each provider's local
+CLI configuration. Codex has no agent selector; use a configured profile or
+model when needed. See [provider-adapters.md](provider-adapters.md) for the
+provider-specific discovery and execution contracts.
+
+`run-multiruntime` validates before dispatch, writes `launching` durably before
+submitting a worker, and updates the JSON ledger atomically. It launches only
+tasks with verified dependencies. Independent tasks can run together, while
+overlapping write scopes and artifact reservations are serialized. It blocks
+tasks that require an unavailable provider while continuing unrelated tasks.
+An uncertain effect is `outcome-unknown`; it is not retried automatically.
+The runner's per-ledger `.lock` marker is fail-closed: after a crash, reconcile
+provider effects before manually removing a stale marker and running again.
+
+Root fields are `schema_version: 4`, `run` (an object for run metadata, which may
+be empty), and `tasks` (a list, which may be empty). Every task requires the keys
+in the example below. No OpenCode worker/subagent count applies to schema 4.
+
+- `task_id` is unique and matches `[A-Za-z0-9][A-Za-z0-9_.-]*`.
+- `parent_task_id` is a logical owner's task ID or `null`; `depends_on` is a list
+  of prerequisite task IDs. Both references must exist and their respective
+  graphs must be acyclic. `parent_task_id` alone never serializes tasks.
+- `provider` is `codex`, `opencode`, or `antigravity`. `agent_id`, `model_id`,
+  `runtime_ref`, and `runtime_status` are non-empty strings or `null`.
+  Configured agent/model identifiers may be recorded before dispatch;
+  provider-generated session/conversation IDs are recorded only after the
+  runtime returns them. `runtime_ref` is the observed provider reference.
+  Provider-specific parent/session fields may be added as optional metadata;
+  they never substitute for the logical DAG.
+- `workspace` is an existing directory, absolute or relative to the ledger's
+  directory. All other paths resolve relative to that task's workspace.
+  `prompt_path` must name an existing file. `write_scopes` and `evidence_paths`
+  are lists of paths; `output_path` is a path or `null`. Paths must be accessible
+  in the validator's host path syntax and stay within the workspace, including
+  after symlink resolution. Output/evidence files may be absent until verified.
+  Scopes can describe files or directories that do not exist yet. An empty
+  `write_scopes` means the worker is read-only; the coordinator may persist its
+  returned output/evidence within the workspace.
+- Overlapping write scopes are allowed only when a direct or transitive
+  `depends_on` edge orders the tasks, including logical parent/child tasks;
+  `parent_task_id` alone never allows overlapping scopes. Paths are compared by
+  components (`src` overlaps `src/a.py`, but not `src2`).
+- `criterion` is a non-empty assertion for Codex to review against the result.
+  `notes` is a string and must contain a reason for `failed`, `blocked`,
+  `partial`, `interrupted`, or `cancelled` tasks.
+- `state` is one of `pending`, `launching`, `running`, `awaiting-approval`,
+  `outcome-unknown`, `completed`, `verified`, `blocked`, `failed`, `interrupted`,
+  `cancelled`, or `partial`. `execution_outcome` is `unknown`, `succeeded`,
+  `failed`, `interrupted`, or `cancelled`; `runtime_status` remains the literal
+  observed provider status, independently of the local state.
+- `created_at` and `last_state_at` are UTC `YYYY-MM-DDTHH:MM:SSZ` timestamps.
+  Preserve creation time and advance state time on transitions; state time
+  cannot precede creation time.
+
+The runner stores response and trace artifacts under
+`.orchestrator/<ledger-path-hash>/<task-id>/` within the task workspace. When
+`output_path` is `null`, the runner may use its response artifact as the task
+output. Confirm artifact paths and declared scopes do not conflict across
+tasks before dispatch.
+
+Runtime success transitions to `completed`, never automatically to `verified`.
+Codex reviews output against `criterion`, then calls `verify-task` to persist
+JSON evidence and mark the task `verified`. For every verified task the validator
+requires `execution_outcome: "succeeded"`, a non-null existing output file, and
+at least one existing evidence file. Every evidence record must contain that
+task's exact `task_id` and `criterion`, `result: "pass"`, and a non-empty string
+`observed`. File existence or process exit alone cannot prove verification.
+These checks apply per task: unfinished independent tasks do not invalidate a
+verified result, and a missing optional provider does not invalidate the run.
+To close a run, use `validate --closing PATH` (or the shell route's
+`validate-ledger-v4 --closing PATH`). The validator rejects `pending`, `launching`,
+`running`, `awaiting-approval`, `outcome-unknown`, and `completed` tasks in this
+mode. Every task must be `verified` with the successful outcome and evidence
+described above, or `blocked`, `failed`, `interrupted`, `cancelled`, or `partial`
+with a non-empty reason in `notes`. `completed` still awaits Codex review.
+
+Example evidence for a reviewed task:
+
+```json
+{
+  "task_id": "research",
+  "criterion": "The report identifies the public integration points.",
+  "result": "pass",
+  "observed": "Inspected the report and matched each integration point to its source."
+}
+```
+
+The following illustrative run has independent Codex/OpenCode tasks, a Codex
+integration task depending on both, and a blocked optional Antigravity task.
+Replace `workspace`, create the prompt files, and reconcile artifact paths
+before validation. Runtime references remain null until observed.
+The pending tasks make this example eligible for default validation, but it
+cannot pass `--closing` until those tasks are verified or documented exceptional
+outcomes.
+
+```json
+{
+  "schema_version": 4,
+  "run": {},
+  "tasks": [
+    {
+      "task_id": "research", "parent_task_id": null, "depends_on": [],
+      "provider": "codex", "agent_id": null, "model_id": null, "runtime_ref": null,
+      "workspace": "/workspace/project", "write_scopes": ["artifacts/research"],
+      "prompt_path": "prompts/research.md", "output_path": "artifacts/research/report.md",
+      "criterion": "The report identifies the public integration points.",
+      "evidence_paths": [], "state": "pending", "runtime_status": null,
+      "execution_outcome": "unknown", "created_at": "2026-10-28T12:00:00Z",
+      "last_state_at": "2026-10-28T12:00:00Z", "notes": ""
+    },
+    {
+      "task_id": "implementation", "parent_task_id": null, "depends_on": [],
+      "provider": "opencode", "agent_id": null, "model_id": null, "runtime_ref": null,
+      "workspace": "/workspace/project", "write_scopes": ["src"],
+      "prompt_path": "prompts/implementation.md", "output_path": null,
+      "criterion": "The assigned integration is implemented within src.",
+      "evidence_paths": [], "state": "pending", "runtime_status": null,
+      "execution_outcome": "unknown", "created_at": "2026-10-28T12:00:00Z",
+      "last_state_at": "2026-10-28T12:00:00Z", "notes": ""
+    },
+    {
+      "task_id": "integration", "parent_task_id": null,
+      "depends_on": ["research", "implementation"],
+      "provider": "codex", "agent_id": null, "model_id": null, "runtime_ref": null,
+      "workspace": "/workspace/project", "write_scopes": ["src", "artifacts/integration"],
+      "prompt_path": "prompts/integration.md", "output_path": null,
+      "criterion": "The integration report reconciles research and implementation.",
+      "evidence_paths": [], "state": "pending", "runtime_status": null,
+      "execution_outcome": "unknown", "created_at": "2026-10-28T12:00:00Z",
+      "last_state_at": "2026-10-28T12:00:00Z", "notes": ""
+    },
+    {
+      "task_id": "optional-review", "parent_task_id": null, "depends_on": [],
+      "provider": "antigravity", "agent_id": null, "model_id": null, "runtime_ref": null,
+      "workspace": "/workspace/project", "write_scopes": [],
+      "prompt_path": "prompts/optional-review.md", "output_path": null,
+      "criterion": "The optional independent review records actionable findings.",
+      "evidence_paths": [], "state": "blocked", "runtime_status": null,
+      "execution_outcome": "unknown", "created_at": "2026-10-28T12:00:00Z",
+      "last_state_at": "2026-10-28T12:00:00Z",
+      "notes": "Antigravity CLI is unavailable; independent tasks may continue."
+    }
+  ]
+}
+```
+
+## Schema 3: legacy OpenCode YAML
+
+Everything below describes the unchanged schema-3 contract. Existing ledgers
+continue through `validate_dag.sh` and `validate_ledger_closed.sh` with their
+existing options; do not send schema-3 YAML to `validate-ledger-v4`.
+
 The ledger is the durable local source for identity, ownership, dependencies, scopes, concurrency and reconciliation. The runtime does not persist it. The model has two levels: top-level worker sessions and subagents that are children of a worker. DAG dependencies order execution; they never express ownership.
 
 ## Single schema
