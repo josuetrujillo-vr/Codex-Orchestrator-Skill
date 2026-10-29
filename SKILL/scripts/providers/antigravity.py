@@ -53,8 +53,13 @@ class AntigravityAdapter(ProviderAdapter):
         timeout = positive_seconds(task.get("timeout_seconds", self.timeout))
         args = ["-p", prompt_text, "--output-format", "stream-json",
                 "--print-timeout", f"{timeout:g}s", "--model", model, "--agent", agent]
-        trace.dispatched = True
-        output = self._invoke(args, workspace, timeout=timeout + 5, stdin="", trace=trace)
+        if self.herdr_transport is not None:
+            output = self._invoke_herdr(
+                args, task, workspace, timeout=timeout + 5, stdin="", trace=trace,
+            )
+        else:
+            trace.dispatched = True
+            output = self._invoke(args, workspace, timeout=timeout + 5, stdin="", trace=trace)
         events, malformed = json_events(output.stdout, "event")
         runtime_ref = None
         runtime_status = None

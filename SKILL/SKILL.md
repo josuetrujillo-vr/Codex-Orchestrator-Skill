@@ -1,13 +1,13 @@
 ---
 name: codex-multi-runtime-orchestrator
-description: "Use from Codex to coordinate distinct multi-agent work across configured Codex CLI, OpenCode, and Antigravity workers: split work into a dependency-aware DAG, dispatch independent tasks, track a schema-4 ledger, review results, and integrate them. Activate for requests to orchestrate multiple agents or runtimes; not for single-agent tasks, general agent explanations, or generic data-pipeline orchestration. OpenCode-only schema-3 workflows remain a legacy route. Reply in the user's language; skill artifacts and commands are in English."
+description: "Use from Codex to coordinate distinct multi-agent work across configured Codex CLI, OpenCode, and Antigravity workers, optionally launched through HERDR Core hc: split work into a dependency-aware DAG, dispatch independent tasks, track a schema-4 ledger, review results, and integrate them. Activate for requests to orchestrate multiple agents or runtimes; not for single-agent tasks, general agent explanations, or generic data-pipeline orchestration. OpenCode-only schema-3 workflows remain a legacy route. Reply in the user's language; skill artifacts and commands are in English."
 license: MIT
-compatibility: "Codex conversation is the root coordinator. Worker adapters require their locally installed CLI and authentication. Shell commands use POSIX sh; Python 3.9+ is required for schema-4 JSON commands."
+compatibility: "Codex conversation is the root coordinator. Worker adapters require their locally installed CLI and authentication. HERDR Core is an optional local execution backend that requires hc. Shell commands use POSIX sh; Python 3.9+ is required for schema-4 JSON commands."
 metadata:
   author: DragonJAR.org
   skill_version: "2.0.0"
   category: workflow-automation
-  tags: [codex, opencode, antigravity, orchestration, dag, parallel-execution]
+  tags: [codex, opencode, antigravity, herdr, hc, orchestration, dag, parallel-execution]
 ---
 
 # Codex Multi-Runtime Orchestrator
@@ -45,6 +45,12 @@ sh SKILL/scripts/orchestrate.sh validate-ledger-v4 --closing runs/example/ledger
 dependencies are `verified`. A returned result is `completed`, not verified:
 Codex must inspect the output against the criterion and call `verify-task`.
 
+Provider commands run directly by default. To keep them visible in persistent
+HERDR Core terminals, set `run.execution_backend` to `herdr` in the schema-4
+ledger; `run.herdr.command` may override the default `hc` executable. Install and
+start Herdr Core separately. HERDR terminal names are recorded as
+`transport_ref`; provider session IDs remain in `runtime_ref`.
+
 ## Orchestration workflow
 
 1. **Discover.** Run `preflight-providers`, optionally with `--ledger PATH` to
@@ -81,10 +87,10 @@ Run commands through `sh SKILL/scripts/orchestrate.sh`:
 
 | Command | Purpose |
 |---|---|
-| `preflight-providers [--ledger PATH]` | Emit independent JSON capability records for Codex, OpenCode, and Antigravity. Missing providers are nonfatal. |
+| `preflight-providers [--ledger PATH]` | Emit independent JSON capability records for Codex, OpenCode, and Antigravity; include Herdr Core when configured. Missing providers are nonfatal. |
 | `validate-ledger-v4 [--closing] PATH` | Validate schema-4 JSON locally; it does not contact providers. |
 | `run-multiruntime --ledger PATH [--parallel N]` | Execute ready schema-4 tasks, persist state, and emit a JSON summary. |
-| `status-multiruntime --ledger PATH` | Show task states and observed runtime references as JSON. |
+| `status-multiruntime --ledger PATH` | Show task states, provider references, and Herdr terminal references as JSON. |
 | `verify-task --ledger PATH --task-id ID --observed TEXT` | Record Codex's evidence for a completed task and mark it verified. |
 
 Python 3.9+ is required for these schema-4 commands. Existing OpenCode shell

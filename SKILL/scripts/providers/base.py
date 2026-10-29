@@ -88,6 +88,7 @@ class ProviderResult:
     started_at: str
     finished_at: str
     trace_path: Optional[str]
+    transport_ref: Optional[str] = None
 
     def __post_init__(self):
         if self.execution_outcome not in OUTCOMES:
@@ -172,6 +173,7 @@ class Trace:
         self.dispatched = False
         self.runtime_ref = None
         self.runtime_status = None
+        self.transport_ref = None
         self.write_error = False
         with self.path.open("x", encoding="utf-8"):
             pass
@@ -205,13 +207,14 @@ class ProviderAdapter(ABC):
     provider = ""
 
     def __init__(self, artifact_dir=None, *, command=None, timeout=600,
-                 model_id=None, agent_id=None, profile=None):
+                 model_id=None, agent_id=None, profile=None, herdr_transport=None):
         self.artifact_dir = Path(artifact_dir) if artifact_dir is not None else None
         self.command = [command] if isinstance(command, str) else list(command or [])
         self.timeout = positive_seconds(timeout)
         self.model_id = model_id
         self.agent_id = agent_id
         self.profile = profile
+        self.herdr_transport = herdr_transport
         self.redactor = Redactor()
 
     def _command(self):
@@ -243,6 +246,29 @@ class ProviderAdapter(ABC):
             except OSError:
                 trace.write_error = True
         return output
+
+    def _invoke_herdr(self, args, task, workspace, *, timeout=None, stdin=None,
+                      trace=None):
+        if self.herdr_transport is None:
+            raise ProviderError("Herdr transport was not configured")
+        terminal_name = task.get("transport_ref")
+        if not isinstance(terminal_name, str) or not terminal_name:
+            raise ProviderError("Herdr task has no persisted transport_ref")
+        result = self.herdr_transport.run(
+            str(task.get("task_id", "task")), terminal_name,
+            [*self._command(), *args], workspace,
+            timeout or self.timeout, stdin=stdin,
+        )
+        if trace:
+            trace.dispatched = trace.dispatched or result.dispatch_may_have_occurred
+            trace.transport_ref = result.transport_ref
+            try:
+                trace.process(result.process_output, args[0] if args else "provider")
+            except OSError:
+                trace.write_error = True
+        if result.error:
+            raise ProviderError(result.error)
+        return result.process_output
 
     def preflight(self) -> ProviderStatus:
         try:
@@ -294,10 +320,13 @@ class ProviderAdapter(ABC):
                 started, trace, error=str(exc), runtime_ref=reference,
                 runtime_status=trace.runtime_status if trace else None,
                 execution_outcome="unknown" if dispatched else "failed",
+                transport_ref=(trace.transport_ref if trace else
+                               task.get("transport_ref") if isinstance(task, dict) else None),
             )
 
     def _result(self, started, trace=None, *, runtime_ref=None, runtime_status=None,
-                execution_outcome="unknown", response="", error=None):
+                execution_outcome="unknown", response="", error=None,
+                transport_ref=None):
         clean = self.redactor.text
         if trace and trace.write_error:
             execution_outcome = "unknown"
@@ -307,6 +336,8 @@ class ProviderAdapter(ABC):
             clean(runtime_status) if runtime_status else None, execution_outcome,
             clean(response), clean(error) if error else None, started, utc_now(),
             str(trace.path) if trace else None,
+            clean(transport_ref or (trace.transport_ref if trace else None))
+            if transport_ref or (trace and trace.transport_ref) else None,
         )
 
     @abstractmethod

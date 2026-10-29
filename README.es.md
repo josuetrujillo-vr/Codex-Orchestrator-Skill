@@ -50,6 +50,13 @@ no como `verified`. Las dependencias se ejecutan cuando sus prerrequisitos ya
 están verificados. La [guía de adaptadores](SKILL/references/provider-adapters.md)
 explica capacidades, permisos, workspaces y reconciliación de timeouts.
 
+Por defecto, los comandos de proveedores se ejecutan directamente. Para usar
+terminales locales persistentes de HERDR Core, configura
+`run.execution_backend` como `"herdr"` en el ledger. Necesitas `hc` instalado
+localmente; `run.herdr.command` permite indicar otra ruta al ejecutable. El
+ledger guarda el nombre del terminal en `transport_ref` y las sesiones del
+proveedor en `runtime_ref`.
+
 ## Instalar como skill de Codex
 
 Copia el directorio `SKILL/` al directorio de skills de Codex con el nombre

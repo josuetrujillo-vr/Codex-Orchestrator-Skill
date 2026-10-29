@@ -14,6 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from providers import AntigravityAdapter, CodexAdapter, OpenCodeAdapter, ProviderStatus
+from providers import HerdrTransport
 from providers.base import Redactor, utc_now
 from validate_ledger_v4 import (
     ACTIVE_STATES, EXCEPTIONAL_STATES, TERMINAL_STATES, InvalidLedger, nonempty,
@@ -87,6 +88,14 @@ def save(path, ledger, closing=False):
     atomic_json(path, ledger)
 
 
+def execution_config(ledger):
+    run = ledger.get("run", {})
+    backend = run.get("execution_backend", "direct")
+    herdr = run.get("herdr", {})
+    command = herdr.get("command", "hc")
+    return backend, [command] if isinstance(command, str) else list(command)
+
+
 def provider_options(ledger):
     configurations = ledger.get("run", {}).get("providers", {})
     require(isinstance(configurations, dict) and configurations.keys() <= ADAPTERS.keys(),
@@ -108,11 +117,12 @@ def provider_options(ledger):
     return result
 
 
-def discover(options, providers, root=None):
+def discover(options, providers, root=None, herdr_transport=None):
     records = {}
     for provider in providers:
         try:
-            adapter = ADAPTERS[provider](**options.get(provider, {}))
+            adapter = ADAPTERS[provider](herdr_transport=herdr_transport,
+                                         **options.get(provider, {}))
             if root is None:
                 records[provider] = adapter.preflight()
             else:
@@ -190,7 +200,7 @@ def transition(task, state, note=None):
 
 
 def task_status(task):
-    keys = ("task_id", "provider", "state", "runtime_ref", "runtime_status",
+    keys = ("task_id", "provider", "state", "runtime_ref", "transport_ref", "runtime_status",
             "execution_outcome", "output_path", "response_path", "trace_path",
             "started_at", "finished_at", "last_state_at", "notes")
     return {key: task[key] for key in keys if key in task}
@@ -215,6 +225,8 @@ def reconcile(task, result, ledger, ledger_path):
     for key in ("runtime_ref", "runtime_status", "execution_outcome", "started_at",
                 "finished_at", "trace_path"):
         task[key] = REDACTOR.value(getattr(result, key))
+    if getattr(result, "transport_ref", None):
+        task["transport_ref"] = REDACTOR.value(result.transport_ref)
     state = {"succeeded": "completed", "failed": "failed", "interrupted": "interrupted",
              "cancelled": "cancelled", "unknown": "outcome-unknown"}[task["execution_outcome"]]
     if state == "outcome-unknown" and result.runtime_status == "awaiting-approval":
@@ -241,12 +253,15 @@ def run(ledger_path, parallel):
     with ledger_lock(ledger_path):
         ledger = load(ledger_path)
         options = provider_options(ledger)
+        backend, herdr_command = execution_config(ledger)
         limit = parallel if parallel is not None else ledger["run"].get("max_parallel_tasks", 3)
         tasks = {task["task_id"]: task for task in ledger["tasks"]}
+        run_id = hashlib.sha256(str(ledger_path).encode("utf-8")).hexdigest()[:16]
         # No runtime resume/retry contract exists. Durable in-flight work retains its scope.
         for task in tasks.values():
             if task["state"] in {"launching", "running"} or (
-                    task["state"] == "pending" and task["runtime_ref"] is not None):
+                    task["state"] == "pending" and (
+                        task["runtime_ref"] is not None or task.get("transport_ref"))):
                 task["execution_outcome"] = "unknown"
                 transition(task, "outcome-unknown", "Previous dispatch requires reconciliation; automatic retry is disabled.")
         save(ledger_path, ledger)
@@ -266,9 +281,24 @@ def run(ledger_path, parallel):
                     root = workspace(task, ledger_path)
                     provider = task["provider"]
                     discovery_key = (provider, root)
+                    herdr_transport = (HerdrTransport(herdr_command)
+                                       if backend == "herdr" else None)
                     if discovery_key not in statuses:
-                        statuses[discovery_key] = discover(options, [provider], root)[provider]
+                        statuses[discovery_key] = discover(
+                            options, [provider], root,
+                            herdr_transport=herdr_transport)[provider]
                     status = statuses[discovery_key]
+                    herdr_status = None
+                    if backend == "herdr":
+                        herdr_key = ("herdr", root)
+                        if herdr_key not in statuses:
+                            statuses[herdr_key] = HerdrTransport(herdr_command).preflight(root)
+                        herdr_status = statuses[herdr_key]
+                    if herdr_status is not None and not herdr_status.available:
+                        transition(task, "blocked", herdr_status.reason or
+                                   "Required Herdr Core CLI is unavailable.")
+                        changed = True
+                        continue
                     if not status.available:
                         transition(task, "blocked", status.reason or "Required provider is unavailable.")
                         changed = True
@@ -302,12 +332,18 @@ def run(ledger_path, parallel):
                                 for item in task["evidence_paths"])
                             require(not scopes_overlap([output], own_runner_paths),
                                     "output path conflicts with this task's runner artifacts")
-                        adapter = ADAPTERS[task["provider"]](artifact_dir=artifact_dir,
-                                                            **options.get(task["provider"], {}))
+                        herdr_transport = (HerdrTransport(herdr_command, artifact_dir)
+                                           if backend == "herdr" else None)
+                        adapter = ADAPTERS[task["provider"]](
+                            artifact_dir=artifact_dir, herdr_transport=herdr_transport,
+                            **options.get(task["provider"], {}))
                     except (OSError, ValueError, RuntimeError):
                         transition(task, "blocked", "Task inputs or adapter configuration are unusable.")
                         changed = True
                         continue
+                    if backend == "herdr":
+                        task["transport_ref"] = HerdrTransport.terminal_name(
+                            run_id, task["task_id"], task["created_at"])
                     transition(task, "launching")
                     save(ledger_path, ledger)  # Durable write-ahead MUST precede submit.
                     try:
@@ -405,9 +441,20 @@ def main(argv=None):
     try:
         ledger_path = Path(args.ledger).resolve() if args.ledger else None
         if args.command == "preflight":
-            options = provider_options(load(ledger_path)) if ledger_path else {}
-            for record in discover(options, ADAPTERS).values():
+            ledger = load(ledger_path) if ledger_path else None
+            options = provider_options(ledger) if ledger is not None else {}
+            herdr_transport = None
+            if ledger is not None:
+                backend, command = execution_config(ledger)
+                if backend == "herdr":
+                    herdr_transport = HerdrTransport(command)
+            for record in discover(options, ADAPTERS,
+                                   herdr_transport=herdr_transport).values():
                 emit({**asdict(record), "available": record.available})
+            if ledger is not None:
+                if backend == "herdr":
+                    record = HerdrTransport(command).preflight(Path.cwd())
+                    emit({**asdict(record), "available": record.available})
         elif args.command == "status":
             emit(summary(load(ledger_path)))
         elif args.command == "run":

@@ -47,6 +47,7 @@ references/triggers-es.md
 scripts/_json.awk
 scripts/_validators.awk
 scripts/dragon_name.sh
+scripts/herdr_worker.py
 scripts/orchestrate-darwin.sh
 scripts/orchestrate-linux.sh
 scripts/orchestrate-wsl.sh
@@ -65,6 +66,7 @@ scripts/providers/__init__.py
 scripts/providers/antigravity.py
 scripts/providers/base.py
 scripts/providers/codex.py
+scripts/providers/herdr.py
 scripts/providers/opencode.py
 scripts/prompt-templates/router-orchestrator.md
 scripts/run_multiruntime.py

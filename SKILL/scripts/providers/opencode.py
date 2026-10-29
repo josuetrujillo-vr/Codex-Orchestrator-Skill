@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
-from .base import ProviderAdapter, ProviderError, json_object, positive_seconds
+from .base import ProviderAdapter, ProviderError, json_events, json_object, positive_seconds
 
 
 class Contract:
@@ -226,6 +226,37 @@ class OpenCodeAdapter(ProviderAdapter):
         return contract, directory, agents, models
 
     def _preflight(self, workspace):
+        if self.herdr_transport is not None:
+            help_output = self._invoke(["run", "--help"], workspace,
+                                       timeout=15, stdin="")
+            if (help_output.timed_out or help_output.returncode != 0 or
+                    "--format" not in help_output.stdout or
+                    "--agent" not in help_output.stdout or
+                    "--model" not in help_output.stdout):
+                return self._status(True, False,
+                                    "installed OpenCode CLI lacks run JSON, agent, or model options")
+            agents_output = self._invoke(["agent", "list"], workspace,
+                                         timeout=20, stdin="")
+            models_output = self._invoke(["models"], workspace,
+                                         timeout=30, stdin="")
+            if (agents_output.timed_out or agents_output.returncode != 0 or
+                    models_output.timed_out or models_output.returncode != 0):
+                return self._status(True, False,
+                                    "OpenCode CLI agent/model catalogs are unavailable")
+            agents_text = re.sub(r"\x1b\[[0-9;]*m", "", agents_output.stdout)
+            models_text = re.sub(r"\x1b\[[0-9;]*m", "", models_output.stdout)
+            agents = tuple(dict.fromkeys(
+                match.group(1) for match in re.finditer(
+                    r"(?m)^\s*([A-Za-z0-9][A-Za-z0-9_.-]*)\b", agents_text)
+                if match.group(1).lower() not in {"agent", "agents", "name", "id"}
+            ))
+            models = tuple(dict.fromkeys(re.findall(
+                r"(?<!\S)([A-Za-z0-9_.-]+/[A-Za-z0-9_.:@+-]+)(?!\S)", models_text
+            )))
+            if not agents or not models:
+                return self._status(True, False,
+                                    "OpenCode CLI returned no usable agent/model identifiers")
+            return self._status(True, True, agents=agents, models=models)
         _, _, agents, models = self._discover(workspace, require_workspace=False)
         return self._status(True, True, agents=agents,
                             models=[f"{item['providerID']}/{item['id']}" for item in models])
@@ -258,7 +289,81 @@ class OpenCodeAdapter(ProviderAdapter):
             query["cursor"] = cursor
         raise ProviderError("OpenCode message read exceeded the bounded pagination window")
 
+    def _run_herdr(self, task, prompt_text, workspace, trace, started):
+        timeout = positive_seconds(task.get("timeout_seconds", self.timeout))
+        status = self._preflight(workspace)
+        if not status.available:
+            raise ProviderError(status.reason or "OpenCode CLI is unavailable")
+        agents, models = status.agents, status.models
+        agent = task.get("agent_id") or self.agent_id
+        model_id = task.get("model_id") or self.model_id
+        candidates = [item for item in models if model_id == item or (
+            isinstance(model_id, str) and "/" not in model_id and
+            item.rsplit("/", 1)[-1] == model_id)]
+        if agent not in agents or len(candidates) != 1:
+            raise ProviderError("configure an exact OpenCode agent_id and unambiguous provider/model identifier")
+        model_name = candidates[0]
+        args = ["run", "--format", "json", "--dir", str(workspace),
+                "--model", model_name, "--agent", agent, prompt_text]
+        output = self._invoke_herdr(
+            args, task, workspace, timeout=timeout, stdin="", trace=trace,
+        )
+        events, malformed = json_events(output.stdout, "type")
+        runtime_ref = None
+        response_parts = []
+        terminal_reason = None
+        stream_error = None
+        for event in events:
+            session_id = event.get("sessionID")
+            if session_id is not None:
+                if not isinstance(session_id, str) or not session_id or (
+                        runtime_ref is not None and runtime_ref != session_id):
+                    malformed = True
+                else:
+                    runtime_ref = session_id
+            kind = event["type"]
+            part = event.get("part")
+            if kind == "text":
+                if not isinstance(part, dict) or part.get("type") != "text" or not isinstance(part.get("text"), str):
+                    malformed = True
+                else:
+                    response_parts.append(part["text"])
+            elif kind == "step_finish":
+                if not isinstance(part, dict) or part.get("type") != "step-finish":
+                    malformed = True
+                elif not isinstance(part.get("reason"), str):
+                    malformed = True
+                else:
+                    terminal_reason = part["reason"]
+            elif kind == "error":
+                stream_error = event.get("message") or "OpenCode reported a JSON stream error"
+        response = "".join(response_parts)
+        runtime_status = f"step_finish:{terminal_reason}" if terminal_reason else None
+        outcome = "unknown"
+        error = stream_error
+        if output.timed_out:
+            error = "OpenCode CLI timed out; reconcile the Herdr terminal before retrying"
+        elif malformed:
+            error = "malformed or inconsistent OpenCode JSON event stream"
+        elif terminal_reason == "error":
+            outcome = "failed"
+            error = error or "OpenCode ended with a terminal error event"
+        elif terminal_reason == "stop" and output.returncode == 0 and not stream_error:
+            if runtime_ref and response:
+                outcome = "succeeded"
+            else:
+                error = "OpenCode stop event lacks a session reference or assistant response"
+        elif terminal_reason == "stop":
+            error = "OpenCode stop event conflicts with the CLI exit status or stream"
+        else:
+            error = error or "no confirmed terminal OpenCode event; reconcile before retrying"
+        return self._result(started, trace, runtime_ref=runtime_ref,
+                            runtime_status=runtime_status,
+                            execution_outcome=outcome, response=response, error=error)
+
     def _run(self, task, prompt_text, workspace, trace, started):
+        if self.herdr_transport is not None:
+            return self._run_herdr(task, prompt_text, workspace, trace, started)
         deadline = time.monotonic() + positive_seconds(task.get("timeout_seconds", self.timeout))
         interval = positive_seconds(task.get("poll_interval_seconds", 2))
         contract, directory, agents, models = self._discover(workspace, trace, deadline)

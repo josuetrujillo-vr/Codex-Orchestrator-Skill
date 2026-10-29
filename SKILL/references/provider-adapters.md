@@ -60,6 +60,36 @@ providers.
 - CLI authentication and permission prompts remain under the user's local
   configuration. The adapter never adds a permission bypass flag.
 
+## Optional HERDR Core transport
+
+The backend remains `direct` unless a schema-4 ledger sets
+`run.execution_backend` to `herdr`. HERDR Core must be installed and running
+locally by the user. `run.herdr.command` optionally supplies its executable or
+argument prefix; the default is `hc`. Preflight checks the documented
+`hc run --bg --name` interface and the selected provider independently without
+starting a worker.
+
+The runner persists a deterministic task-scoped terminal name in optional
+`transport_ref` before dispatch. The helper starts each provider with an argv
+list and `shell=False`, streams its output in the named terminal, and saves
+stdout, stderr, and exit status under that task's `.orchestrator` artifact
+directory. Provider JSONL parsing still determines the outcome; terminal text
+or terminal appearance is never treated as proof of completion. Provider
+session/conversation identity stays in `runtime_ref`, separate from the Herdr
+terminal name.
+
+In HERDR mode, Codex uses `exec --json`, OpenCode uses `run --format json`, and
+Antigravity uses `-p --output-format stream-json`. The adapter requires the
+provider's confirmed success event and a successful process exit. OpenCode's
+JSON stream can omit its final `step_finish` event; when that leaves completion
+unconfirmed, the task stays `outcome-unknown` for reconciliation.
+
+A launch acknowledgement loss, timeout, missing result sidecar, or malformed
+provider stream retains `transport_ref` and the workspace reservation. Do not
+retry automatically or replace the provider `runtime_ref`; inspect the named
+terminal and its local task artifacts, then reconcile the ledger. Semantic
+verification remains Codex's responsibility through `verify-task`.
+
 ## Configuration, workspace, and permissions
 
 Each schema-4 task names a provider, workspace, write scope, prompt, criterion,
@@ -68,6 +98,8 @@ and expected output. It can also name provider-specific `agent_id` and
 these supported keys: `command`, `timeout`, `model_id`, `agent_id`, and
 `profile`. `command` may be an executable name or an argument list. Keep
 authentication in each provider's own local CLI configuration.
+Herdr is configured separately through `run.execution_backend: "herdr"` and
+optional `run.herdr.command`; it does not belong under `run.providers`.
 
 The runner confirms provider readiness in the task workspace before dispatch.
 If the workspace cannot be confirmed, do not grant write access; use a

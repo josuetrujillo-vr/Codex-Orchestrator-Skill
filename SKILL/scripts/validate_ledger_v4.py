@@ -117,6 +117,18 @@ def validate(ledger, ledger_dir, closing=False):
     require(isinstance(ledger.get("run"), dict), "run must be an object")
     limit = ledger["run"].get("max_parallel_tasks", 3)
     require(type(limit) is int and limit > 0, "run.max_parallel_tasks must be a positive integer")
+    backend = ledger["run"].get("execution_backend", "direct")
+    require(isinstance(backend, str) and backend in {"direct", "herdr"},
+            "run.execution_backend must be direct or herdr")
+    herdr = ledger["run"].get("herdr", {})
+    require(isinstance(herdr, dict) and herdr.keys() <= {"command"},
+            "run.herdr must contain only command")
+    if "command" in herdr:
+        command = herdr["command"]
+        require(nonempty(command) or (
+                    isinstance(command, list) and command and
+                    all(nonempty(item) for item in command)),
+                "run.herdr.command must be an executable or non-empty argument list")
     require(isinstance(ledger.get("tasks"), list), "tasks must be a list")
     tasks = {}
     paths = {}
@@ -140,6 +152,9 @@ def validate(ledger, ledger_dir, closing=False):
         for field in ("agent_id", "model_id", "runtime_ref", "runtime_status", "parent_task_id"):
             require(task[field] is None or nonempty(task[field]),
                     f"{label}.{field} must be null or a non-empty string")
+        if "transport_ref" in task:
+            require(task["transport_ref"] is None or nonempty(task["transport_ref"]),
+                    f"{label}.transport_ref must be null or a non-empty string")
         require(nonempty(task["criterion"]), f"{label}.criterion must be non-empty")
         require(isinstance(task["notes"], str), f"{label}.notes must be a string")
         created = timestamp(task["created_at"], f"{label}.created_at")

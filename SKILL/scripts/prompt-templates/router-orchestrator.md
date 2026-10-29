@@ -46,6 +46,13 @@ persists `launching` first, and runs independent ready tasks concurrently up
 to the configured limit (default 3). It records runtime success as
 `completed`; it never marks semantic work verified automatically.
 
+The provider execution backend is `direct` by default. Use
+`run.execution_backend: "herdr"` only when the ledger opts into local HERDR Core
+(`hc`); preserve its terminal name in `transport_ref` and the provider's
+session/conversation ID in `runtime_ref`. If dispatch or completion is
+uncertain, retain the reservation and reconcile the named terminal before any
+manual retry.
+
 For each completed task, inspect the output and evidence against its exact
 acceptance criterion. If and only if the criterion is met, call:
 

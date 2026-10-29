@@ -30,8 +30,15 @@ class CodexAdapter(ProviderAdapter):
                 args.extend([flag, value])
         args.append("-")
         timeout = positive_seconds(task.get("timeout_seconds", self.timeout))
-        trace.dispatched = True
-        output = self._invoke(args, workspace, stdin=prompt_text, trace=trace, timeout=timeout)
+        if self.herdr_transport is not None:
+            output = self._invoke_herdr(
+                args, task, workspace, stdin=prompt_text, trace=trace,
+                timeout=timeout,
+            )
+        else:
+            trace.dispatched = True
+            output = self._invoke(args, workspace, stdin=prompt_text, trace=trace,
+                                  timeout=timeout)
         events, malformed = json_events(output.stdout, "type")
         runtime_ref = None
         runtime_status = None

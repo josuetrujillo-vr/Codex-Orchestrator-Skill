@@ -50,6 +50,12 @@ Dependencies launch only after their prerequisites are verified. The
 [adapter guide](SKILL/references/provider-adapters.md) explains capabilities,
 permission behavior, workspaces, and timeout reconciliation.
 
+Provider commands run directly by default. To use persistent local HERDR Core
+terminals, set `run.execution_backend` to `"herdr"` in the ledger; `hc` must be
+installed locally, and `run.herdr.command` can override its executable path.
+Status keeps the Herdr terminal name in `transport_ref` and provider session IDs
+in `runtime_ref`.
+
 ## Install as a Codex skill
 
 Copy the `SKILL/` directory into your Codex skills directory, using the
