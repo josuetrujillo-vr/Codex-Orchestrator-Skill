@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Added HERDR Core (`hc`) as an optional local execution backend for Codex CLI,
+  OpenCode, and Antigravity workers. Direct provider execution remains the
+  default; Herdr terminal references are tracked separately from provider
+  session references, and uncertain launches retain their ledger reservations.
+
 ### Changed
 
 - Reframed the skill as `codex-multi-runtime-orchestrator`, with the active

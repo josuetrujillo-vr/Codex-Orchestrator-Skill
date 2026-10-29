@@ -15,6 +15,19 @@ The runner entry points are `preflight-providers [--ledger PATH]`,
 `verify-task --ledger PATH --task-id ID --observed TEXT`, exposed through
 `sh scripts/orchestrate.sh`. The default run limit is
 `run.max_parallel_tasks: 3`; `--parallel N` overrides it for that invocation.
+The execution backend defaults to `direct`. To opt in to Herdr Core, set
+`run.execution_backend: "herdr"` and optionally `run.herdr.command` to an
+executable string or argument list (default: `hc`). Herdr mode requires a local
+`hc` CLI with `run --bg --name` support; installation and Core server lifecycle
+remain under the user's control.
+For example, opt in with this `run` object:
+
+```json
+{"execution_backend":"herdr","herdr":{"command":"hc"}}
+```
+
+Omit `execution_backend` or set it to `"direct"` to keep the existing provider
+CLI transport.
 
 Optional `run.providers` is an object keyed by `codex`, `opencode`, or
 `antigravity`. Each value may contain only `command` (executable string or
@@ -30,6 +43,9 @@ tasks with verified dependencies. Independent tasks can run together, while
 overlapping write scopes and artifact reservations are serialized. It blocks
 tasks that require an unavailable provider while continuing unrelated tasks.
 An uncertain effect is `outcome-unknown`; it is not retried automatically.
+In Herdr mode, persist `transport_ref` before dispatch and keep it with the
+reservation until the provider result is reconciled. Do not infer completion from
+the terminal's rendered text or replace `runtime_ref` with the terminal name.
 The runner's per-ledger `.lock` marker is fail-closed: after a crash, reconcile
 provider effects before manually removing a stale marker and running again.
 
@@ -46,6 +62,9 @@ in the example below. No OpenCode worker/subagent count applies to schema 4.
   Configured agent/model identifiers may be recorded before dispatch;
   provider-generated session/conversation IDs are recorded only after the
   runtime returns them. `runtime_ref` is the observed provider reference.
+  Optional `transport_ref` is the Herdr terminal name. It may be omitted or null
+  in older and direct-mode ledgers; retain it when dispatch is uncertain so the
+  terminal can be reconciled without treating its name as a provider session.
   Provider-specific parent/session fields may be added as optional metadata;
   they never substitute for the logical DAG.
 - `workspace` is an existing directory, absolute or relative to the ledger's

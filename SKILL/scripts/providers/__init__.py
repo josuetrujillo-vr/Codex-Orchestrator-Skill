@@ -3,9 +3,11 @@
 from .antigravity import AntigravityAdapter
 from .base import ProviderAdapter, ProviderResult, ProviderStatus
 from .codex import CodexAdapter
+from .herdr import HerdrResult, HerdrTransport
 from .opencode import OpenCodeAdapter
 
 __all__ = [
-    "ProviderAdapter", "ProviderResult", "ProviderStatus",
+    "ProviderAdapter", "ProviderResult", "ProviderStatus", "HerdrResult",
+    "HerdrTransport",
     "CodexAdapter", "OpenCodeAdapter", "AntigravityAdapter",
 ]
